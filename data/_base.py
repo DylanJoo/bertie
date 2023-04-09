@@ -17,3 +17,5 @@ def parse_features(x):
             "label_ids": tf.io.FixedLenSequenceFeature([], tf.float32, allow_missing=True),
     }
     sample = tf.io.parse_single_example(x, features_schema)
+    return sample
+
