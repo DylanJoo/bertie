@@ -6,141 +6,165 @@ import random
 import string
 import sys
 import tensorflow as tf
+import data
 
-# model_fn = run_classifier_with_tfhub.model_fn_builder(
-#   num_labels=len(label_list),
-#   learning_rate=LEARNING_RATE,
-#   num_train_steps=num_train_steps,
-#   num_warmup_steps=num_warmup_steps,
-#   use_tpu=True,
-#   bert_hub_module_handle=BERT_MODEL_HUB
-# )
-#
-# estimator_from_tfhub = tf.contrib.tpu.TPUEstimator(
-#   use_tpu=True,
-#   model_fn=model_fn,
-#   config=get_run_config(OUTPUT_DIR),
-#   train_batch_size=TRAIN_BATCH_SIZE,
-#   eval_batch_size=EVAL_BATCH_SIZE,
-#   predict_batch_size=PREDICT_BATCH_SIZE,
-# )
-
-def training(estimator):
-    """
-    The training stage.
-    
-    Args:
-        train_batch_size (int)
-        eval_batch_size (int)
-        max_seq_length (int)
-
-    TODO: 
-    1. Few training setup should be done within a config object.
-    2. Adopt to huggingface API with multiprocessing.
-    """
-    train_features = 0
-    print('***** Started loading dataset at {} *****'.format(task_dir))
-    ## [DEMO] the demo data
-    N = 1000
+def get_demo_dataset(N=1000):
+    """ A demo dataset with 1000 examples. """
     sentA = [f'this is a {i} query for bertie testing.' for i in range(N)]
     sentB = [f'this is a {i} passage for bertie testing. In addition, this sentence is longer than the queries.' for i in range(N)]
     labels = random.choices([0, 1], k=N)
     data = {'query': sentA, 'document': sentB, 'label': labels}
     dataset = Dataset.from_dict(data)
+    return dataset
+
+from _base import _int64_feature, _float_feature, _byte_feature
+
+def main(estimator):
+    # Prepare TPU running config
+	is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
+	run_config = tf.contrib.tpu.RunConfig(
+				cluster=tpu_cluster_resolver,
+				model_dir=OUTPUT_DIR,
+				save_checkpoints_steps=SAVE_CHECKPOINTS_STEPS,
+				tpu_config=tf.contrib.tpu.TPUConfig(
+					iterations_per_loop=ITERATIONS_PER_LOOP,
+					num_shards=NUM_TPU_CORES,
+					per_host_input_for_training=is_per_host)
+				)
+    tpu_cluster_resolver = None
+    if FLAGS.use_tpu and FLAGS.tpu_name:
+        tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
+                FLAGS.tpu_name, 
+                zone=FLAGS.tpu_zone, 
+                project=FLAGS.gcp_project
+        )
+	is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
+
+    ## [NOTE] The following codes may need to move to 'model'
+    BERT_MODEL = 'uncased_L-12_H-768_A-12' 
+    BERT_MODEL_HUB = 'https://tfhub.dev/google/bert_' + BERT_MODEL + '/4'
+    BERT_PRETRAINED_DIR = 'gs://cloud-tpu-checkpoints/bert/' + BERT_MODEL 
+    print('***** BERT pretrained directory: {} *****'.format(BERT_PRETRAINED_DIR))
+
+	# Setup configuration of data/model/train
+	## data
+
+	## training
+	run_config = tf.contrib.tpu.RunConfig(
+				cluster=tpu_cluster_resolver,
+				model_dir=OUTPUT_DIR,
+				save_checkpoints_steps=SAVE_CHECKPOINTS_STEPS,
+				tpu_config=tf.contrib.tpu.TPUConfig(
+					iterations_per_loop=ITERATIONS_PER_LOOP,
+					num_shards=NUM_TPU_CORES,
+					per_host_input_for_training=is_per_host)
+				)
+
+	## model
+    bert_config = modeling.BertConfig.from_json_file(FLAGS.bert_config_file)
+    INIT_CHECKPOINT = os.path.join(BERT_PRETRAINED_DIR, 'bert_model.ckpt')
+    model_fn = model_fn_builder(
+            bert_config=bert_config,
+            init_checkpoint=FLAGS.init_checkpoint,
+            learning_rate=FLAGS.learning_rate,
+            num_train_steps=num_train_steps,
+            num_warmup_steps=num_warmup_steps,
+            use_tpu=FLAGS.use_tpu,
+            use_one_hot_embeddings=FLAGS.use_tpu
+    )
+    OUTPUT_DIR = OUTPUT_DIR.replace('bert-tfhub', 'bert-checkpoints')
+    tf.gfile.MakeDirs(OUTPUT_DIR)
+
+    ## model -- initalize
+    estimator = tf.contrib.tpu.TPUEstimator(
+      use_tpu=FLAGS.use_tpu,
+      model_fn=model_fn,
+      config=run_config,
+      train_batch_size=TRAIN_BATCH_SIZE,
+      eval_batch_size=EVAL_BATCH_SIZE,
+      predict_batch_size=PREDICT_BATCH_SIZE,
+    )
+
+    """ the training codes.
+    TODO: 
+    -----
+    0. Customized dataset schema for hf dataset.
+    1. Few training setup should be done within a config object.
+    2. Adopt to huggingface API with multiprocessing.
+    """
+
+
+    print('***** Started loading dataset *****')
+    if train_file.endswith('.tfrecord') is False:
+        train_file = f"{train_file.rsplit('.', 1)[0]}.tfrecord"
+        dataset = get_demo_dataset()
+
+        print('  convert hf dataset into tfrecord, and will save at {}'.format(train_file))
+        createDataRecord(train_file, dataset)
+        print('  .tfrecord is saved.')
 
     print('***** Started training at {} *****'.format(datetime.datetime.now()))
-
     print('  Num examples = {}'.format(len(dataset)))
     print('  Batch size = {}'.format(TRAIN_BATCH_SIZE))
     tf.logging.info("  num steps = %d", num_train_steps)
 
-    if not os.path.exists(train_file):
-        createDataRecord(train_file, dataset)
-        tf.logging.info("  .tfrecord dataset saved at {}.".format(train_file))
     train_input_fn = data.t5.input_fn_builder(train_file)
-
-    # features=train_features,
-    # seq_length=max_seq_length,
-    # is_training=true,
-    # drop_remainder=true
     estimator.train(input_fn=train_input_fn, max_steps=num_train_steps)
 
     print('***** finished training at {} *****'.format(datetime.datetime.now()))
 
-# Setup task specific model and TPU running config.
-BERT_MODEL = 'uncased_L-12_H-768_A-12' 
-BERT_MODEL_HUB = 'https://tfhub.dev/google/bert_' + BERT_MODEL + '/4'
-BERT_PRETRAINED_DIR = 'gs://cloud-tpu-checkpoints/bert/' + BERT_MODEL 
-print('***** BERT pretrained directory: {} *****'.format(BERT_PRETRAINED_DIR))
+    if DO_OUTPUT:
+        tf.logging.info("***** Output prediction at {} *****".format(EMBEDDING_FILE))
+        tf.logging.info("  Batch size = %d", EVAL_BATCH_SIZE)
 
-CONFIG_FILE = os.path.join(BERT_PRETRAINED_DIR, 'bert_config.json')
-INIT_CHECKPOINT = os.path.join(BERT_PRETRAINED_DIR, 'bert_model.ckpt')
+        max_eval_examples = None
+        max_eval_examples = 100 # debugging
 
-model_fn = run_classifier.model_fn_builder(
-    bert_config=modeling.BertConfig.from_json_file(CONFIG_FILE),
-    num_labels=len(label_list),
-    init_checkpoint=INIT_CHECKPOINT,
-    learning_rate=LEARNING_RATE,
-    num_train_steps=num_train_steps,
-    num_warmup_steps=num_warmup_steps,
-    use_tpu=True,
-    use_one_hot_embeddings=True
-)
+        if eval_file.endswith('.tfrecord') is False:
+            eval_file = f"{eval_file.rsplit('.', 1)[0]}.tfrecord"
+            dataset = get_demo_dataset()
 
-OUTPUT_DIR = OUTPUT_DIR.replace('bert-tfhub', 'bert-checkpoints')
-tf.gfile.MakeDirs(OUTPUT_DIR)
+            print('***** Started converting dataset into tfrecord at {} *****'.format(train_file))
+            createDataRecord(train_file, dataset)
+            print("  .tfrecord is saved at {}.".format(train_file))
 
-estimator_from_checkpoints = tf.contrib.tpu.TPUEstimator(
-  use_tpu=True,
-  model_fn=model_fn,
-  config=get_run_config(OUTPUT_DIR),
-  train_batch_size=TRAIN_BATCH_SIZE,
-  eval_batch_size=EVAL_BATCH_SIZE,
-  predict_batch_size=PREDICT_BATCH_SIZE,
-)
+        print('***** Started prediction *****'.format(datetime.datetime.now()))
+        eval_input_fn = data.t5.input_fn_builder(
+                eval_file, is_train=False
+        ) # the difference of output and eval.
 
+        writer = tf.io.TFRecordWriter(f"{eval_file.rsplit('.', 1)[0]}.embeddings.tf")
 
-model_train(estimator_from_checkpoints)
+        tf.logging.set_verbosity(tf.logging.WARN)
 
-# model_eval(estimator_from_checkpoints)
-# model_predict(estimator_from_checkpoints)
-# def model_eval(estimator):
-#   # Eval the model.
-#   eval_examples = processor.get_dev_examples(TASK_DATA_DIR)
-#   eval_features = run_classifier.convert_examples_to_features(
-#       eval_examples, label_list, MAX_SEQ_LENGTH, tokenizer)
-#   print('***** Started evaluation at {} *****'.format(datetime.datetime.now()))
-#   print('  Num examples = {}'.format(len(eval_examples)))
-#   print('  Batch size = {}'.format(EVAL_BATCH_SIZE))
-#
-#   # Eval will be slightly WRONG on the TPU because it will truncate
-#   # the last batch.
-#   eval_steps = int(len(eval_examples) / EVAL_BATCH_SIZE)
-#   eval_input_fn = run_classifier.input_fn_builder(
-#       features=eval_features,
-#       seq_length=MAX_SEQ_LENGTH,
-#       is_training=False,
-#       drop_remainder=True)
-#   result = estimator.evaluate(input_fn=eval_input_fn, steps=eval_steps)
-#   print('***** Finished evaluation at {} *****'.format(datetime.datetime.now()))
-#   output_eval_file = os.path.join(OUTPUT_DIR, "eval_results.txt")
-#   with tf.gfile.GFile(output_eval_file, "w") as writer:
-#     print("***** Eval results *****")
-#     for key in sorted(result.keys()):
-#       print('  {} = {}'.format(key, str(result[key])))
-#       writer.write("%s = %s\n" % (key, str(result[key])))
-#
-# model_eval(estimator_from_tfhub)
-#
-# def model_predict(estimator):
-#   # Make predictions on a subset of eval examples
-#   prediction_examples = processor.get_dev_examples(TASK_DATA_DIR)[:PREDICT_BATCH_SIZE]
-#   input_features = run_classifier.convert_examples_to_features(prediction_examples, label_list, MAX_SEQ_LENGTH, tokenizer)
-#   predict_input_fn = run_classifier.input_fn_builder(features=input_features, seq_length=MAX_SEQ_LENGTH, is_training=False, drop_remainder=True)
-#   predictions = estimator.predict(predict_input_fn)
-#
-#   for example, prediction in zip(prediction_examples, predictions):
-#     print('text_a: %s\ntext_b: %s\nlabel:%s\nprediction:%s\n' % (example.text_a, example.text_b, str(example.label), prediction['probabilities']))
-#
-# model_predict(estimator_from_tfhub)
+		outputs = estimator.predict(
+		        input_fn=eval_input_fn,
+		        yield_single_examples=True, 
+		        checkpoint_path=EVAL_CHECKPOINT
+		)
 
+		start_time = time.time()
+		# collecting outputs
+		for output in tqdm(outputs):
+		    # pooled embeddings (specified during train)
+		    pooled_emb = output['pooling_embeddings'].astype('float16')
+            pooled_emb = pooled_emb.reshape(-1).tostring()
+
+		    fts = tf.train.Features(feature={
+		        "doc_id": _int64_feature(output['docid']),
+		        "doc_emb": _byte_feature([pooled_emb]),
+            })
+            example = tf.train.Example(features=fts)
+            writer.write(example.SerializeToString())
+
+        tf.logging.warm(" Latency = %.4f", (time.time() - start_time))
+        writer.close()
+		    
+
+if __name__ == "__main__":
+    flags.mark_flag_as_required("data_dir")
+    flags.mark_flag_as_required("task_name")
+    flags.mark_flag_as_required("vocab_file")
+    flags.mark_flag_as_required("bert_config_file")
+    flags.mark_flag_as_required("output_dir")
+    tf.app.run()

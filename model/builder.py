@@ -19,10 +19,10 @@ def model_fn_builder(
         tf.logging.info("*** Features ***")
         for name in sorted(features.keys()):
             tf.logging.info("  name = %s, shape = %s" % (name, features[name].shape))
-        is_training = (mode == tf.estimator.ModeKeys.TRAIN)
+        is_train = (mode == tf.estimator.ModeKeys.TRAIN)
 
         tf.logging.info("*** Start creating model ***")
-        if is_training:
+        if is_train:
             # [TODO] adjust the order of keyword args.
             model_outputs = create_model(
                     bert_config, is_training, **features, 
@@ -40,7 +40,7 @@ def model_fn_builder(
             assignment_map_outputs = modeling.get_assignment_map_from_checkpoint(
                     tvars, init_checkpoint
             )
-            assignment_map, initialized_variable_names = assignment_map_outputs
+            (assignment_map, initialized_variable_names) = assignment_map_outputs
             # (assignment_map1, initialized_variable_names1) = modeling.get_assignment_map_from_checkpoint(
             #         tvars, init_checkpoint, 'Student/', 'query_reformulator/'
             # )
@@ -65,8 +65,13 @@ def model_fn_builder(
         output_spec = None
         if mode == tf.estimator.ModeKeys.TRAIN:
 
+            # [TODO] maybe keyword arguments
             train_op = optimization.create_optimizer(
-                    total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu
+                    total_loss, 
+                    learning_rate, 
+                    num_train_steps, 
+                    num_warmup_steps, 
+                    use_tpu
             )
             output_spec = tf.contrib.tpu.TPUEstimatorSpec(
                     mode=mode,
@@ -91,3 +96,32 @@ def model_fn_builder(
 
     return model_fn
 
+
+# def model_fn_builder(
+#         bert_config, 
+#         init_checkpoint, 
+#         learning_rate,
+#         num_train_steps, 
+#         num_warmup_steps, 
+#         use_tpu,
+#         use_one_hot_embeddings
+#     ):
+# 	"""Returns `model_fn` closure for TPUEstimator."""
+#     # colbert_dim, dotbert_dim, max_q_len, max_p_len, doc_type,
+#     # loss, kd_source, train_model, eval_model, is_eval, is_output
+#
+#     def model_fn(features, labels, mode, params):
+# 		"""The `model_fn` for TPUEstimator."""
+# 		tf.logging.info("*** Features ***")
+# 		for name in sorted(features.keys()):
+# 		    tf.logging.info("  name = %s, shape = %s" % (name, features[name].shape))
+#
+# 		is_train = (mode == tf.estimator.ModeKeys.TRAIN)
+#
+#         # load inputs
+#         input_ids = features["input_ids"]
+#         token_type_ids = features["token_type_ids"]
+#         attention_mask = features["attention_mask"]
+#
+#         if is_train:
+#             label_ids = features["label_ids"]

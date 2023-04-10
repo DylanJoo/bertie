@@ -51,4 +51,3 @@ def create_model(
     #         "output_bias", [num_labels], 
     #         initializer=tf.zeros_initializer()
     # )
-

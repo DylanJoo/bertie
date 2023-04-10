@@ -1,5 +1,4 @@
 from _base import _int64_feature, _float_feature, _byte_feature
-from _base import parse_features
 from _base import src_preprocessor, tgt_preprocessor
 
 def createDataRecord(filename, dataset, **kwargs):
@@ -18,7 +17,8 @@ def createDataRecord(filename, dataset, **kwargs):
     writer = tf.io.TFRecordWriter(filename)
     def to_tfrecord(ft):
         ft = {k: _int64_feature(v) for (k, v) in ft.items())
-        example = tf.train.Example(features=ft)
+        fts = tf.train.Features(feature=ft)
+        example = tf.train.Example(features=fts)
         writer.write(example.SerializeToString())
         return ft
 
@@ -28,8 +28,7 @@ def createDataRecord(filename, dataset, **kwargs):
 
     return 0
 
-def input_fn_builder(tfrecord_path):
-        # , seq_length, is_training, drop_remainder):
+def input_fn_builder(tfrecord_path): # , seq_length, is_training, drop_remainder):
     """Creates an `input_fn` closure to be passed to TPUEstimator."""
 
     def input_fn(params):
@@ -38,7 +37,7 @@ def input_fn_builder(tfrecord_path):
         output_buffer_size = batch_size * 1000
         num_examples = len(features)
 
-        dataset = tf.io.TFRecordWriter(tfrecord_path)
+        dataset = tf.data.TFRecordDataset(tfrecord_path)
         dataset = dataset.map(parse_features, num_parallel_calls=4)
         dataset = dataset.prefetch(output_buffer_size)
 
@@ -48,10 +47,24 @@ def input_fn_builder(tfrecord_path):
         if is_training:
             dataset = dataset.repeat()
             dataset = dataset.shuffle(buffer_size=1000)
-            dataset = dataset.batch(batch_size=batch_size, drop_remainder=drop_remainder)
         else:
-            pass
+            dataset = dataset.repeat()
+
+        dataset = dataset.batch(
+                batch_size=batch_size, 
+                drop_remainder=drop_remainder
+        )
 
         return dataset
 
     return input_fn
+
+def parse_features(x):
+    features_schema = {
+            "input_ids": tf.io.FixedLenSequenceFeature([], tf.float32, allow_missing=True),
+            "token_type_ids": tf.io.FixedLenSequenceFeature([], tf.float32, allow_missing=True),
+            "attention_mask": tf.io.FixedLenSequenceFeature([], tf.float32, allow_missing=True),
+            "label_ids": tf.io.FixedLenSequenceFeature([], tf.int32, allow_missing=True),
+    }
+    sample = tf.io.parse_single_example(x, features_schema)
+    return sample
