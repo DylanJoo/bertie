@@ -21,24 +21,10 @@ from _base import _int64_feature, _float_feature, _byte_feature
 
 def main(estimator):
     # Prepare TPU running config
-	is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
-	run_config = tf.contrib.tpu.RunConfig(
-				cluster=tpu_cluster_resolver,
-				model_dir=OUTPUT_DIR,
-				save_checkpoints_steps=SAVE_CHECKPOINTS_STEPS,
-				tpu_config=tf.contrib.tpu.TPUConfig(
-					iterations_per_loop=ITERATIONS_PER_LOOP,
-					num_shards=NUM_TPU_CORES,
-					per_host_input_for_training=is_per_host)
-				)
     tpu_cluster_resolver = None
-    if FLAGS.use_tpu and FLAGS.tpu_name:
-        tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
-                FLAGS.tpu_name, 
-                zone=FLAGS.tpu_zone, 
-                project=FLAGS.gcp_project
-        )
-	is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
+    if FLAGS.use_tpu:
+        tpu_cluster_resolver = tf.distribute.cluster_resolver.TPUClusterResolver(TPU_ADDRESS)
+	is_per_host = tf.compat.v1.estimator.tpu.InputPipelineConfig.PER_HOST_V2
 
     ## [NOTE] The following codes may need to move to 'model'
     BERT_MODEL = 'uncased_L-12_H-768_A-12' 
@@ -50,15 +36,16 @@ def main(estimator):
 	## data
 
 	## training
-	run_config = tf.contrib.tpu.RunConfig(
-				cluster=tpu_cluster_resolver,
-				model_dir=OUTPUT_DIR,
-				save_checkpoints_steps=SAVE_CHECKPOINTS_STEPS,
-				tpu_config=tf.contrib.tpu.TPUConfig(
-					iterations_per_loop=ITERATIONS_PER_LOOP,
-					num_shards=NUM_TPU_CORES,
-					per_host_input_for_training=is_per_host)
-				)
+	run_config = tf.compat.v1.estimator.tpu.RunConfig(
+	        cluster=tpu_cluster_resolver,
+	        model_dir=OUTPUT_DIR,
+	        save_checkpoints_steps=SAVE_CHECKPOINTS_STEPS,
+	        tpu_config=tf.compat.v1.estimator.tpu.TPUConfig(
+	            iterations_per_loop=ITERATIONS_PER_LOOP,
+	            num_shards=NUM_TPU_CORES,
+	            per_host_input_for_training=is_per_host
+	        )
+	)
 
 	## model
     bert_config = modeling.BertConfig.from_json_file(FLAGS.bert_config_file)
